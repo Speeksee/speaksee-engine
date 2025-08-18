@@ -6,6 +6,8 @@ from scipy.io import wavfile
 from scipy.interpolate import interp1d
 from sklearn.metrics import accuracy_score, f1_score
 
+import stt_engine, renderer
+
 from scenedetect.video_manager import VideoManager
 from scenedetect.scene_manager import SceneManager
 from scenedetect.frame_timecode import FrameTimecode
@@ -512,6 +514,11 @@ def main():
 	with open(savePath, 'wb') as fil:
 		pickle.dump(scores, fil)
 	sys.stderr.write(time.strftime("%Y-%m-%d %H:%M:%S") + " Scores extracted and saved in %s \r\n" %args.pyworkPath)
+	
+
+	stt_engine.main()
+	renderer.main()
+
 
 	# if args.evalCol == True:
 	# 	evaluate_col_ASD(vidTracks, scores, args) # The columnbia video is too big for visualization. You can still add the `visualization` funcition here if you want

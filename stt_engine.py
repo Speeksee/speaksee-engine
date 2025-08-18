@@ -81,46 +81,49 @@ def create_subtitles(args, num_tracks):
 
     return subtitles_data
 
-# if __name__ == "__main__":
-#     # --- [여기에 args 객체를 직접 만듭니다] ---
-#     # TODO: 1단계에서 생성된 파일 경로에 맞게 수정하세요.
-#     test_video_folder = "./demo/sample"
-#     test_pyavi_path = os.path.join(test_video_folder, 'pyavi')
-#     test_pyframes_path = os.path.join(test_video_folder, 'pyframes')
+def main():
+    # --- [여기에 args 객체를 직접 만듭니다] ---
+    # TODO: 1단계에서 생성된 파일 경로에 맞게 수정하세요.
+    test_video_folder = "./demo/sample"
+    test_pyavi_path = os.path.join(test_video_folder, 'pyavi')
+    test_pyframes_path = os.path.join(test_video_folder, 'pyframes')
 
-#     # 임시 args 객체 생성
-#     args = Args(test_pyavi_path, test_pyframes_path)
+    # 임시 args 객체 생성
+    args = Args(test_pyavi_path, test_pyframes_path)
 
-#     # TODO: 테스트할 트랙 개수에 맞게 수정하세요.
-#     num_tracks_for_test = 28
+    # TODO: 테스트할 트랙 개수에 맞게 수정하세요.
+    num_tracks_for_test = 28
 
-#     print("STT 자막 데이터 생성 시작...")
+    print("STT 자막 데이터 생성 시작...")
 
-#     # create_subtitles 함수를 호출합니다.
-#     subtitles = create_subtitles(args, num_tracks_for_test)
+    # create_subtitles 함수를 호출합니다.
+    subtitles = create_subtitles(args, num_tracks_for_test)
 
-#     print("STT 자막 데이터 생성 완료. 결과 출력:")
+    print("STT 자막 데이터 생성 완료. 결과 출력:")
 
-#     # 1. 전체 데이터의 쉐입(구조) 출력
-#     num_frames_with_subtitles = len(subtitles)
-#     # 한 프레임에 여러 트랙의 자막이 있을 수 있으므로, 첫 번째 프레임의 트랙 수를 쉐입으로 간주합니다.
-#     first_frame_key = list(subtitles.keys())[0] if subtitles else None
-#     num_tracks_in_first_frame = len(subtitles[first_frame_key]) if first_frame_key else 0
+    # 1. 전체 데이터의 쉐입(구조) 출력
+    num_frames_with_subtitles = len(subtitles)
+    # 한 프레임에 여러 트랙의 자막이 있을 수 있으므로, 첫 번째 프레임의 트랙 수를 쉐입으로 간주합니다.
+    first_frame_key = list(subtitles.keys())[0] if subtitles else None
+    num_tracks_in_first_frame = len(subtitles[first_frame_key]) if first_frame_key else 0
 
-#     print(f"\n--- 자막 데이터 쉐입 ---")
-#     print(f"전체 프레임 수: {num_frames_with_subtitles}")
-#     print(f"트랙 수 (첫 프레임 기준): {num_tracks_in_first_frame}")
-#     print("-" * 20)
+    print(f"\n--- 자막 데이터 쉐입 ---")
+    print(f"전체 프레임 수: {num_frames_with_subtitles}")
+    print(f"트랙 수 (첫 프레임 기준): {num_tracks_in_first_frame}")
+    print("-" * 20)
 
-#     # 2. 0번 트랙의 전체 프레임에 대한 자막 데이터 출력
-#     print("\n--- 0번 트랙의 자막 데이터 ---")
+    # 2. 0번 트랙의 전체 프레임에 대한 자막 데이터 출력
+    print("\n--- 0번 트랙의 자막 데이터 ---")
 
-#     # subtitles 딕셔너리의 키(프레임 번호)를 정렬합니다.
-#     sorted_frames = sorted(subtitles.keys())
+    # subtitles 딕셔너리의 키(프레임 번호)를 정렬합니다.
+    sorted_frames = sorted(subtitles.keys())
 
-#     for frame_num in sorted_frames:
-#         # 해당 프레임에 0번 트랙의 자막이 있는 경우에만 출력
-#         if 0 in subtitles[frame_num]:
-#             print(f"프레임 {frame_num}: {subtitles[frame_num][0]}")
+    for frame_num in sorted_frames:
+        # 해당 프레임에 0번 트랙의 자막이 있는 경우에만 출력
+        if 0 in subtitles[frame_num]:
+            print(f"프레임 {frame_num}: {subtitles[frame_num][0]}")
 
-#     print("\n--- 출력 완료. ---")
+    print("\n--- 출력 완료. ---")
+
+if __name__ == "__main__":
+    main()
