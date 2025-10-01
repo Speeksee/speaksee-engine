@@ -4,12 +4,10 @@ import pickle
 import glob
 import numpy as np
 from tqdm import tqdm
-from stt_engine import create_subtitles
+from stt_engine import create_subtitles, stabilize_speakers, transcribe_audio
 
-# ArgumentParser 대신 간단한 설정 변수를 사용합니다.
 class Args:
     def __init__(self):
-        # TODO: 1단계에서 사용한 videoName과 videoFolder에 맞게 수정하세요.
         self.videoName = 'sample'
         self.videoFolder = 'demo'
         self.savePath = os.path.join(self.videoFolder, self.videoName)
@@ -20,7 +18,6 @@ class Args:
 
 args = Args()
 
-# --- 헬퍼 함수 ---
 def is_overlap(bbox1, bbox2):
     """
     두 바운딩 박스가 겹치는지 확인합니다.
@@ -40,10 +37,8 @@ def is_overlap(bbox1, bbox2):
         return False
     return True
 
-
-def render_subtitles(tracks, scores, args, subtitles_data):
+def create_faces(tracks, scores, args):
     flist = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
-    flist.sort()
 
     faces = [[] for _ in range(len(flist))]
     for tidx, track in enumerate(tracks):
@@ -58,163 +53,192 @@ def render_subtitles(tracks, scores, args, subtitles_data):
                 'x': track['proc_track']['x'][fidx],
                 'y': track['proc_track']['y'][fidx]
             })
+    
+    return faces
+
+def render_subtitles(faces, args, subtitles_data):
+    import glob, os, cv2
+    from tqdm import tqdm
+
+    flist = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
+    flist.sort()
+    total_frames = len(flist)
+
+    # 프레임 위치 조회용 dict: frame index -> segment
+    frame_to_segment = {}
+    for seg in subtitles_data:
+        for fidx in range(seg['start_frame'], seg['end_frame'] + 1):
+            frame_to_segment[fidx] = seg
 
     firstImage = cv2.imread(flist[0])
-    fw, fh = firstImage.shape[1], firstImage.shape[0]
-    vOut = cv2.VideoWriter(os.path.join(args.pyaviPath, 'video_rendered.avi'), cv2.VideoWriter_fourcc(*'XVID'), 25, (fw, fh))
+    fh, fw = firstImage.shape[:2]
+    vOut = cv2.VideoWriter(
+        os.path.join(args.pyaviPath, 'video_rendered.avi'),
+        cv2.VideoWriter_fourcc(*'XVID'),
+        25,
+        (fw, fh)
+    )
 
-    # === 안정화 로직에 필요한 변수들 ===
-    last_direction = 'bottom'  # 초기값 설정
-    direction_hold_duration = 0  # 현재 방향이 유지된 프레임 수
-    STABILITY_THRESHOLD = 12   # 0.5초 (25fps 기준 12프레임)
+    last_direction = 'bottom'
+    direction_hold_duration = 0
+    STABILITY_THRESHOLD = 12
+    padding = 20
+    bubble_margin = 30
 
-    for fidx, fname in tqdm(enumerate(flist), total=len(flist)):
+    for fidx, fname in tqdm(enumerate(flist), total=total_frames):
         image = cv2.imread(fname)
         current_faces = faces[fidx]
 
-        if not current_faces:
-            vOut.write(image)
-            continue
+        seg = frame_to_segment.get(fidx)
+        if seg:
+            subtitle_text = seg['text']
+            speaker_track = seg['speaker']
 
-        best_speaker = max(current_faces, key=lambda f: f['score'], default=None)
-
-        if best_speaker and best_speaker['score'] >= 0.5 and fidx in subtitles_data and best_speaker['track'] in subtitles_data[fidx]:
-            speaker_bbox = (best_speaker['x'], best_speaker['y'], best_speaker['s'])
-            subtitle_text = subtitles_data[fidx][best_speaker['track']]
-
-            # --- 말풍선 위치 계산 (가장 넓은 여백 찾기) ---
-            other_bboxes = [
-                (face['x'], face['y'], face['s'])
-                for face in current_faces if face['track'] != best_speaker['track']
-            ]
-
-            (text_w, text_h), _ = cv2.getTextSize(subtitle_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
-            padding = 20
-            bubble_width = text_w + padding * 2
-            bubble_height = text_h + padding * 2
-
-            x_center, y_center, s = speaker_bbox
-
-            top_dist = y_center - s
-            top_space = top_dist - bubble_height
-            for obbox in other_bboxes:
-                if is_overlap([x_center, y_center - s - bubble_height/2, bubble_width/2], obbox):
-                    top_space = -1
+            # speaker 얼굴 찾기
+            speaker_bbox = None
+            for face in current_faces:
+                if face['track'] == speaker_track:
+                    speaker_bbox = (face['x'], face['y'], face['s'])
                     break
 
-            bottom_dist = fh - (y_center + s)
-            bottom_space = bottom_dist - bubble_height
-            for obbox in other_bboxes:
-                if is_overlap([x_center, y_center + s + bubble_height/2, bubble_width/2], obbox):
-                    bottom_space = -1
-                    break
+            if speaker_bbox:
+                x_center, y_center, s = speaker_bbox
 
-            left_dist = x_center - s
-            left_space = left_dist - bubble_width
-            for obbox in other_bboxes:
-                if is_overlap([x_center - s - bubble_width/2, y_center, bubble_width/2], obbox):
-                    left_space = -1
-                    break
+                # 다른 얼굴 바운딩 박스
+                other_bboxes = [
+                    (face['x'], face['y'], face['s'])
+                    for face in current_faces if face['track'] != speaker_track
+                ]
 
-            right_dist = fw - (x_center + s)
-            right_space = right_dist - bubble_width
-            for obbox in other_bboxes:
-                if is_overlap([x_center + s + bubble_width/2, y_center, bubble_width/2], obbox):
-                    right_space = -1
-                    break
+                # 텍스트 크기
+                (text_w, text_h), _ = cv2.getTextSize(subtitle_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
+                bubble_width = text_w + padding * 2
+                bubble_height = text_h + padding * 2
 
-            # 5. 가장 넓은 여백 선택
-            spaces = {'top': top_space, 'bottom': bottom_space, 'left': left_space, 'right': right_space}
-            valid_spaces = {k: v for k, v in spaces.items() if v >= 0}
+                # 여백 계산
+                top_dist = y_center - s
+                top_space = top_dist - bubble_height
+                for obbox in other_bboxes:
+                    if is_overlap([x_center, y_center - s - bubble_height/2, bubble_width/2], obbox):
+                        top_space = -1
+                        break
 
-            if not valid_spaces:
-                current_direction = 'bottom'
-            else:
-                current_direction = max(valid_spaces, key=valid_spaces.get)
+                bottom_dist = fh - (y_center + s)
+                bottom_space = bottom_dist - bubble_height
+                for obbox in other_bboxes:
+                    if is_overlap([x_center, y_center + s + bubble_height/2, bubble_width/2], obbox):
+                        bottom_space = -1
+                        break
 
-            # === 안정화 로직 ===
-            if current_direction == last_direction:
-                direction_hold_duration += 1
-            else:
-                direction_hold_duration = 0
+                left_dist = x_center - s
+                left_space = left_dist - bubble_width
+                for obbox in other_bboxes:
+                    if is_overlap([x_center - s - bubble_width/2, y_center, bubble_width/2], obbox):
+                        left_space = -1
+                        break
 
-            best_direction_to_render = last_direction
+                right_dist = fw - (x_center + s)
+                right_space = right_dist - bubble_width
+                for obbox in other_bboxes:
+                    if is_overlap([x_center + s + bubble_width/2, y_center, bubble_width/2], obbox):
+                        right_space = -1
+                        break
 
-            if direction_hold_duration >= STABILITY_THRESHOLD:
-                best_direction_to_render = current_direction
-                last_direction = current_direction
-                direction_hold_duration = 0
+                spaces = {'top': top_space, 'bottom': bottom_space, 'left': left_space, 'right': right_space}
+                valid_spaces = {k: v for k, v in spaces.items() if v >= 0}
 
-            best_direction = best_direction_to_render
+                if not valid_spaces:
+                    current_direction = 'bottom'
+                else:
+                    current_direction = max(valid_spaces, key=valid_spaces.get)
 
-            # --- 말풍선 및 연결선 위치 계산 ---
-            line_start_x, line_start_y = int(x_center), int(y_center)
-            bubble_top_left, bubble_bottom_right = (0, 0), (0, 0)
-            text_pos = (0, 0)
-            bubble_margin = 30
+                # 안정화
+                if current_direction == last_direction:
+                    direction_hold_duration += 1
+                else:
+                    direction_hold_duration = 0
 
-            if best_direction == 'top':
-                # 연결선 시작점을 바운딩 박스 상단 중앙으로 설정
-                line_start_y = int(y_center - s)
+                best_direction_to_render = last_direction
+                if direction_hold_duration >= STABILITY_THRESHOLD:
+                    best_direction_to_render = current_direction
+                    last_direction = current_direction
+                    direction_hold_duration = 0
 
-                bubble_x = x_center
-                bubble_y = y_center - s - bubble_height // 2 - bubble_margin
-                line_end = (int(bubble_x), int(bubble_y + bubble_height // 2))
+                best_direction = best_direction_to_render
 
-            elif best_direction == 'bottom':
-                # 연결선 시작점을 바운딩 박스 하단 중앙으로 설정
-                line_start_y = int(y_center + s)
+                # --- 말풍선 및 연결선 위치 계산 ---
+                line_start_x, line_start_y = int(x_center), int(y_center)
+                bubble_top_left, bubble_bottom_right = (0, 0), (0, 0)
+                text_pos = (0, 0)
+                bubble_margin = 30
 
-                bubble_x = x_center
-                bubble_y = y_center + s + bubble_height // 2 + bubble_margin
-                line_end = (int(bubble_x), int(bubble_y - bubble_height // 2))
+                if best_direction == 'top':
+                    # 연결선 시작점을 바운딩 박스 상단 중앙으로 설정
+                    line_start_y = int(y_center - s)
 
-            elif best_direction == 'left':
-                # 연결선 시작점을 바운딩 박스 좌측 중앙으로 설정
-                line_start_x = int(x_center - s)
+                    bubble_x = x_center
+                    bubble_y = y_center - s - bubble_height // 2 - bubble_margin
+                    line_end = (int(bubble_x), int(bubble_y + bubble_height // 2))
 
-                bubble_x = x_center - s - bubble_width // 2 - bubble_margin
-                bubble_y = y_center
-                line_end = (int(bubble_x + bubble_width // 2), int(bubble_y))
+                elif best_direction == 'bottom':
+                    # 연결선 시작점을 바운딩 박스 하단 중앙으로 설정
+                    line_start_y = int(y_center + s)
 
-            elif best_direction == 'right':
-                # 연결선 시작점을 바운딩 박스 우측 중앙으로 설정
-                line_start_x = int(x_center + s)
+                    # 기본 bubble 위치
+                    bubble_x = x_center
+                    bubble_y = y_center + s + bubble_height // 2 + bubble_margin
 
-                bubble_x = x_center + s + bubble_width // 2 + bubble_margin
-                bubble_y = y_center
-                line_end = (int(bubble_x - bubble_width // 2), int(bubble_y))
+                    # 화면 안으로 들어오도록 조정
+                    bubble_x = max(bubble_width // 2, min(fw - bubble_width // 2, bubble_x))
+                    bubble_y = max(bubble_height // 2, min(fh - bubble_height // 2, bubble_y))
 
-            # 말풍선 좌표 계산
-            bubble_top_left = (int(bubble_x - bubble_width / 2), int(bubble_y - bubble_height / 2))
-            bubble_bottom_right = (int(bubble_x + bubble_width / 2), int(bubble_y + bubble_height / 2))
-            text_pos = (bubble_top_left[0] + padding, bubble_top_left[1] + padding + text_h)
+                    # 연결선 끝점 (말풍선과 바운딩 박스 연결)
+                    line_end = (int(bubble_x), int(bubble_y - bubble_height // 2))
 
+                elif best_direction == 'left':
+                    # 연결선 시작점을 바운딩 박스 좌측 중앙으로 설정
+                    line_start_x = int(x_center - s)
 
-            # 6. 렌더링
-            # 연결선 그리기
-            cv2.line(image, (line_start_x, line_start_y), line_end, (255, 255, 255), 2)
+                    bubble_x = x_center - s - bubble_width // 2 - bubble_margin
+                    bubble_y = y_center
+                    line_end = (int(bubble_x + bubble_width // 2), int(bubble_y))
 
-            # 반투명 사각형 그리기
-            overlay = image.copy()
-            cv2.rectangle(overlay, bubble_top_left, bubble_bottom_right, (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.7, image, 0.3, 0, image)
+                elif best_direction == 'right':
+                    # 연결선 시작점을 바운딩 박스 우측 중앙으로 설정
+                    line_start_x = int(x_center + s)
 
-            # 텍스트 그리기
-            cv2.putText(image, subtitle_text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    bubble_x = x_center + s + bubble_width // 2 + bubble_margin
+                    bubble_y = y_center
+                    line_end = (int(bubble_x - bubble_width // 2), int(bubble_y))
+                
+                # 말풍선 좌표 계산
+                bubble_top_left = (int(bubble_x - bubble_width / 2), int(bubble_y - bubble_height / 2))
+                bubble_bottom_right = (int(bubble_x + bubble_width / 2), int(bubble_y + bubble_height / 2))
+                text_pos = (bubble_top_left[0] + padding, bubble_top_left[1] + padding + text_h)
 
-        # 바운딩 박스 그리기 (주석 처리 또는 삭제)
-        # for face in current_faces:
-        #     clr_box = (0, 255, 0) if face == best_speaker and face['score'] >= 0.5 else (0, 0, 255)
-        #     cv2.rectangle(image, (int(face['x']-face['s']), int(face['y']-face['s'])), (int(face['x']+face['s']), int(face['y']+face['s'])), clr_box, 10)
+               # 6. 렌더링
+                # 연결선 그리기
+                cv2.line(image, (line_start_x, line_start_y), line_end, (255, 255, 255), 2)
 
+                # 반투명 사각형 그리기
+                overlay = image.copy()
+                cv2.rectangle(overlay, bubble_top_left, bubble_bottom_right, (0, 0, 0), -1)
+                cv2.addWeighted(overlay, 0.7, image, 0.3, 0, image)
+
+                # 텍스트 그리기
+                cv2.putText(image, subtitle_text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+        # 항상 프레임 추가
         vOut.write(image)
 
     vOut.release()
 
+    # 오디오 합치기
     command = ("ffmpeg -y -i %s -i %s -threads %d -c:v copy -c:a copy %s -loglevel panic" %
-           (os.path.join(args.pyaviPath, 'video_rendered.avi'), os.path.join(args.pyaviPath, 'audio.wav'),
-            args.nDataLoaderThread, os.path.join(args.pyaviPath, 'final_output.avi')))
+               (os.path.join(args.pyaviPath, 'video_rendered.avi'),
+                os.path.join(args.pyaviPath, 'audio.wav'),
+                args.nDataLoaderThread,
+                os.path.join(args.pyaviPath, 'final_output.avi')))
     os.system(command)
 
 def main():
@@ -231,16 +255,17 @@ def main():
     with open(scores_path, 'rb') as f:
         scores = pickle.load(f)
 
+    faces = create_faces(tracks, scores, args)
     print("Successfully loaded tracks and scores. Starting rendering...")
 
     # --- 이 부분이 수정됩니다. ---
     print("STT 자막 데이터 생성 시작...")
     # stt_engine.py의 함수를 호출하여 자막 데이터를 생성합니다.
-    subtitles_data = create_subtitles(args, len(tracks))
+    subtitles_data = create_subtitles(args, faces)
     print("STT 자막 데이터 생성 완료.")
     # ---------------------------
 
-    render_subtitles(tracks, scores, args, subtitles_data)
+    render_subtitles(faces, args, subtitles_data)
     print("Rendering complete. Final video saved as 'final_output.avi'")
 
 if __name__ == '__main__':

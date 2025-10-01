@@ -1,129 +1,176 @@
+# stt_engine.py (최종 정리 버전)
 import os
 import whisper
-import glob
 import re
+import pickle
+import glob
+import numpy as np
 
-class Args:
-    def __init__(self, pyavi_path, pyframes_path):
-        self.pyaviPath = pyavi_path
-        self.pyframesPath = pyframes_path
+FPS = 25
 
-def get_file_paths(args):
-    audio_path = os.path.join(args.pyaviPath, 'audio.wav')
-    frame_files = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
-    return audio_path, len(frame_files)
-
-def create_subtitles(args, num_tracks):
-    audio_path, num_frames = get_file_paths(args)
+# -----------------------
+# 1️⃣ Audio → Segment
+# -----------------------
+def transcribe_audio(audio_path, num_frames, long_segment_threshold=5.0):
+    """
+    Whisper로 오디오를 텍스트로 변환하고,
+    긴 segment는 문장부호 기준으로 sub-segment로 분할
+    """
     model = whisper.load_model("base")
-
     result = model.transcribe(audio_path, verbose=False, word_timestamps=True)
 
-    fps = 25
-    subtitles_data = {}
+    segments = []
 
-    # 긴 segment의 기준 시간 (초)
-    LONG_SEGMENT_THRESHOLD = 5.0
+    for seg in result['segments']:
+        start_sec = seg['start']
+        end_sec = seg['end']
+        text = seg['text'].strip()
 
-    for segment in result['segments']:
-        start_time_sec = segment['start']
-        end_time_sec = segment['end']
-
-        # segment의 길이가 기준보다 길 경우에만 문장 부호로 분할
-        if (end_time_sec - start_time_sec) > LONG_SEGMENT_THRESHOLD:
-            words = segment['words']
-            if not words:
-                continue
-
-            # 문장 부호를 기준으로 단어 리스트를 나눕니다.
-            sub_segments = []
-            current_sub_segment_words = []
-
-            for word in words:
-                current_sub_segment_words.append(word)
-                # 텍스트에 문장 부호가 포함되어 있는지 확인
-                if re.search(r'[.?!,]', word['text']):
-                    sub_segments.append(current_sub_segment_words)
-                    current_sub_segment_words = []
-
-            # 마지막 남은 단어들을 추가 (문장 부호가 없었을 경우)
-            if current_sub_segment_words:
-                sub_segments.append(current_sub_segment_words)
-
-            # 분할된 sub_segments를 자막 데이터로 변환
-            for sub_segment_words in sub_segments:
-                if not sub_segment_words:
-                    continue
-
-                start_frame = int(sub_segment_words[0]['start'] * fps)
-                end_frame = int(sub_segment_words[-1]['end'] * fps)
-                text = ' '.join([word['text'] for word in sub_segment_words]).strip()
-
-                # 자막 데이터 할당
-                for f in range(start_frame, end_frame):
-                    if f < num_frames:
-                        if f not in subtitles_data:
-                            subtitles_data[f] = {}
-                        for tidx in range(num_tracks):
-                            subtitles_data[f][tidx] = text
+        # 긴 segment: 문장부호 기준 sub-segment 분할
+        if (end_sec - start_sec) > long_segment_threshold and 'words' in seg:
+            words = seg['words']
+            current_sub = []
+            for w in words:
+                current_sub.append(w)
+                if re.search(r'[.?!,]', w['text']):
+                    s_frame = int(current_sub[0]['start'] * FPS)
+                    e_frame = int(current_sub[-1]['end'] * FPS)
+                    e_frame = min(e_frame, num_frames - 1)
+                    segments.append({
+                        'start_frame': s_frame,
+                        'end_frame': e_frame,
+                        'text': ' '.join([x['text'] for x in current_sub]).strip()
+                    })
+                    current_sub = []
+            if current_sub:  # 마지막 남은 단어
+                s_frame = int(current_sub[0]['start'] * FPS)
+                e_frame = int(current_sub[-1]['end'] * FPS)
+                e_frame = min(e_frame, num_frames - 1)
+                segments.append({
+                    'start_frame': s_frame,
+                    'end_frame': e_frame,
+                    'text': ' '.join([x['text'] for x in current_sub]).strip()
+                })
         else:
-            # segment 길이가 짧으면 기존 방식대로 처리
-            start_frame = int(start_time_sec * fps)
-            end_frame = int(end_time_sec * fps)
-            text = segment['text'].strip()
+            # 짧은 segment는 그대로
+            s_frame = int(start_sec * FPS)
+            e_frame = int(end_sec * FPS)
+            e_frame = min(e_frame, num_frames - 1)
+            segments.append({
+                'start_frame': s_frame,
+                'end_frame': e_frame,
+                'text': text
+            })
+    return segments
 
-            for f in range(start_frame, end_frame):
-                if f < num_frames:
-                    if f not in subtitles_data:
-                        subtitles_data[f] = {}
-                    for tidx in range(num_tracks):
-                        subtitles_data[f][tidx] = text
+# -----------------------
+# 2️⃣ Segment Speaker Stabilization
+# -----------------------
+def stabilize_speakers(segments, faces, threshold=0.5):
+    """
+    각 segment별 frame 점수(face score) 분석 후 화자를 확정
+    faces: frame별 face dict list
+    """
+    stabilized_segments = []
 
-    return subtitles_data
+    for seg in segments:
+        start = seg['start_frame']
+        end = seg['end_frame']
+
+        # track별 승리 횟수 카운트
+        track_win_counts = {}
+        for fidx in range(start, end + 1):
+            if not faces[fidx]:
+                continue
+            # 프레임에서 최고 score 가진 face 선택
+            best_face = max(faces[fidx], key=lambda f: f['score'])
+            if best_face['score'] >= threshold:
+                tid = best_face['track']
+                track_win_counts[tid] = track_win_counts.get(tid, 0) + 1
+
+        best_tid = max(track_win_counts, key=track_win_counts.get) if track_win_counts else None
+
+        seg_copy = seg.copy()
+        seg_copy['speaker'] = best_tid
+        stabilized_segments.append(seg_copy)
+
+    return stabilized_segments
+
+# -----------------------
+# 3️⃣ Main create_subtitles
+# -----------------------
+def create_subtitles(args, faces=None):
+    """
+    args: pyaviPath, pyframesPath
+    faces: 실제 트랙 점수 정보 (stabilize_speakers에서 필요)
+    
+    return: [{'start_frame', 'end_frame', 'text', 'speaker'}, ...]
+    """
+    audio_path = os.path.join(args.pyaviPath, 'audio.wav')
+    num_frames = len(os.listdir(os.path.join(args.pyframesPath)))
+
+    # 1. ASR + Segment 분리
+    segments = transcribe_audio(audio_path, num_frames)
+
+    # 2. Segment별 화자 안정화
+    if faces is None:
+        # faces 정보가 없으면 화자 None 처리
+        stabilized_segments = [dict(seg, speaker=None) for seg in segments]
+    else:
+        stabilized_segments = stabilize_speakers(segments, faces)
+
+    return stabilized_segments
+
+# -----------------------
+# Example usage
+# -----------------------
+class Args:
+    def __init__(self, pyavi_path, pyframes_path, pywork_path):
+        self.pyaviPath = pyavi_path
+        self.pyframesPath = pyframes_path
+        self.pyworkPath = pywork_path
 
 def main():
-    # --- [여기에 args 객체를 직접 만듭니다] ---
-    # TODO: 1단계에서 생성된 파일 경로에 맞게 수정하세요.
     test_video_folder = "./demo/sample"
-    test_pyavi_path = os.path.join(test_video_folder, 'pyavi')
-    test_pyframes_path = os.path.join(test_video_folder, 'pyframes')
+    args = Args(os.path.join(test_video_folder, 'pyavi'),
+                os.path.join(test_video_folder, 'pyframes'),
+                os.path.join(test_video_folder, 'pywork')
+                )
+    
+    tracks_path = os.path.join(args.pyworkPath, 'tracks.pckl')
+    scores_path = os.path.join(args.pyworkPath, 'scores.pckl')
 
-    # 임시 args 객체 생성
-    args = Args(test_pyavi_path, test_pyframes_path)
+    if not os.path.exists(tracks_path) or not os.path.exists(scores_path):
+        print(f"Error: {tracks_path} or {scores_path} not found. Please run the 1st step first.")
+        return
 
-    # TODO: 테스트할 트랙 개수에 맞게 수정하세요.
-    num_tracks_for_test = 28
+    with open(tracks_path, 'rb') as f:
+        tracks = pickle.load(f)
 
-    print("STT 자막 데이터 생성 시작...")
+    with open(scores_path, 'rb') as f:
+        scores = pickle.load(f)
 
-    # create_subtitles 함수를 호출합니다.
-    subtitles = create_subtitles(args, num_tracks_for_test)
+    flist = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
 
-    print("STT 자막 데이터 생성 완료. 결과 출력:")
+    faces = [[] for _ in range(len(flist))]
+    for tidx, track in enumerate(tracks):
+        print(f"Track ID: {tidx}, First frame: {track['track']['frame'].tolist()[0]}")
+        score = scores[tidx]
+        for fidx, frame in enumerate(track['track']['frame'].tolist()):
+            s_smoothed = np.mean(score[max(fidx - 2, 0): min(fidx + 3, len(score) - 1)])
+            faces[frame].append({
+                'track': tidx,
+                'score': float(s_smoothed),
+                's': track['proc_track']['s'][fidx],
+                'x': track['proc_track']['x'][fidx],
+                'y': track['proc_track']['y'][fidx]
+            })
 
-    # 1. 전체 데이터의 쉐입(구조) 출력
-    num_frames_with_subtitles = len(subtitles)
-    # 한 프레임에 여러 트랙의 자막이 있을 수 있으므로, 첫 번째 프레임의 트랙 수를 쉐입으로 간주합니다.
-    first_frame_key = list(subtitles.keys())[0] if subtitles else None
-    num_tracks_in_first_frame = len(subtitles[first_frame_key]) if first_frame_key else 0
+    subtitles = create_subtitles(args, faces)
 
-    print(f"\n--- 자막 데이터 쉐입 ---")
-    print(f"전체 프레임 수: {num_frames_with_subtitles}")
-    print(f"트랙 수 (첫 프레임 기준): {num_tracks_in_first_frame}")
-    print("-" * 20)
-
-    # 2. 0번 트랙의 전체 프레임에 대한 자막 데이터 출력
-    print("\n--- 0번 트랙의 자막 데이터 ---")
-
-    # subtitles 딕셔너리의 키(프레임 번호)를 정렬합니다.
-    sorted_frames = sorted(subtitles.keys())
-
-    for frame_num in sorted_frames:
-        # 해당 프레임에 0번 트랙의 자막이 있는 경우에만 출력
-        if 0 in subtitles[frame_num]:
-            print(f"프레임 {frame_num}: {subtitles[frame_num][0]}")
-
-    print("\n--- 출력 완료. ---")
+    print("Segments with speaker info:")
+    for seg in subtitles:
+        print(seg)
 
 if __name__ == "__main__":
     main()
