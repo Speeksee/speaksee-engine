@@ -140,20 +140,209 @@ include Setup of env, IDE and typical getting started instructions?
 -->
 
 ### Improving The Documentation
-<!-- TODO
-Updating, improving and correcting the documentation
+Improvements of updating, improving and correcting the documentation are  always welcome! This includes:
 
--->
+- Fixing typos or grammatical errors
+- Adding examples or clarifications
+- Translating documentation
+- Writing tutorials or guides
+
+---
+
+## Development Workflow
+
+### 1. Fork the Repository
+
+1. Navigate to the [Speeksee repository](https://github.com/Speeksee/speeksee)
+2. Click the **"Fork"** button in the top-right corner
+3. Select your GitHub account to create a forked repository
+
+### 2. Clone Your Forked Repository
+
+```bash
+git clone https://github.com/YOUR-USERNAME/speeksee.git
+cd speeksee
+```
+
+### 3. Add Upstream Remote
+
+Add the original repository as upstream to fetch latest changes:
+
+```bash
+git remote add upstream https://github.com/Speeksee/speeksee.git
+git fetch upstream
+```
+
+Verify your remotes:
+
+```bash
+git remote -v
+# origin    https://github.com/YOUR-USERNAME/speeksee.git (fetch)
+# origin    https://github.com/YOUR-USERNAME/speeksee.git (push)
+# upstream  https://github.com/Speeksee/speeksee.git (fetch)
+# upstream  https://github.com/Speeksee/speeksee.git (push)
+```
+
+### 4. Create a Branch
+
+Branch naming convention: `<type>/#<issue-number>`
+
+```bash
+# Update your local main branch first
+git checkout main
+git pull upstream main
+
+# Create a new branch
+git checkout -b feat/#1
+```
+
+**Branch Types:**
+- `feat/#1` - New features
+- `bug/#2` - Bug fixes
+- `refactor/#3` - Code refactoring
+- `docs/#4` - Documentation updates
+- `test/#5` - Test code
+- `chore/#6` - Build process, dependency updates, etc.
+
+### 5. Make Your Changes
+
+1. Make your changes in your branch
+2. Test your changes thoroughly
+3. Follow the [code style guidelines](#code-style)
+
+### 6. Commit Your Changes
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```bash
+git add .
+git commit -m "<branch types>: <commit messages>"
+```
+
+### 7. Sync with Upstream
+
+Before creating a pull request, sync your branch with the latest upstream changes:
+
+```bash
+# Fetch latest changes from upstream
+git fetch upstream
+
+# Merge upstream changes into your branch
+git checkout feat/#1
+git merge upstream/main
+
+# Resolve any conflicts if they occur
+# After resolving conflicts:
+git add .
+git commit -m "chore: merge upstream changes"
+```
+
+### 8. Push to Your Fork
+
+```bash
+git push origin feat/#1
+```
+
+### 9. Create a Pull Request
+
+1. Go to your forked repository on GitHub
+2. Click **"Compare & pull request"** button
+3. Fill out the PR form:
+   - **Base repository**: `Speeksee/speeksee` | **Base branch**: `main`
+   - **Head repository**: `YOUR-USERNAME/speeksee` | **Compare branch**: `feat/#1`
+   - **Title**: Clear and descriptive
+   - **Description**: Include the following:
+
+```markdown
+## Description
+Brief description of what this PR does
+
+## Changes
+- List of key changes
+- Another change
+
+## How to Test
+1. Step-by-step instructions
+2. To test the changes
+
+## Related Issue
+Closes #1
+```
+
+4. Click **"Create pull request"**
+
+### 10. Review Process
+
+**What Happens Next:**
+
+1. **Automatic Checks**: CI/CD pipelines will run automated tests
+2. **Code Review**: At least one maintainer will review your code
+3. **Feedback**: Maintainers may request changes or ask questions
+4. **Approval**: Once approved, a maintainer will merge your PR
+
+**Review Criteria:**
+- Code quality and adherence to project standards
+- Proper testing and documentation
+- No breaking changes to existing functionality
+- Alignment with project goals
+
+**During Review:**
+
+Respond to feedback and make requested changes:
+
+```bash
+git add .
+git commit -m "fix: address review comments"
+git push origin feat/#1
+```
+
+The PR will automatically update with your new commits.
+
+### 11. After Your PR is Merged
+
+Congratulations! 🎉
+
+**Clean Up:**
+
+```bash
+# Update your local main branch
+git checkout main
+git pull upstream main
+
+# Delete your feature branch
+git branch -d feat/#1
+git push origin --delete feat/#1
+```
+
+### 12. Keep Your Fork Updated
+
+Regularly sync your fork with the upstream repository:
+
+```bash
+git checkout main
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
 
 ## Styleguides
+
 ### Commit Messages
-<!-- TODO
 
--->
+- Use the present tense ("Add feature" not "Added feature")
+- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
+- Limit the first line to 72 characters or less
+- Reference issues and pull requests liberally after the first line
+- Follow [Conventional Commits](https://www.conventionalcommits.org/) specification
 
-## Join The Project Team
-<!-- TODO -->
+### Code Style
 
-<!-- omit in toc -->
+- Follow existing code conventions in the repository
+- Use automated formatters/linting tools where available
+- Write clear, self-documenting code
+- Add comments for complex logic
+- Write meaningful variable and function names
+
+
 ## Attribution
 This guide is based on the **contributing-gen**. [Make your own](https://github.com/bttger/contributing-gen)!
