@@ -24,6 +24,7 @@ All types of contributions are encouraged and valued. See the [Table of Contents
 - [Styleguides](#styleguides)
 - [Commit Messages](#commit-messages)
 - [Join The Project Team](#join-the-project-team)
+- [Contribution Workflow](#contribution-workflow)
 
 
 ## Code of Conduct
@@ -147,9 +148,28 @@ Improvements of updating, improving and correcting the documentation are  always
 - Translating documentation
 - Writing tutorials or guides
 
+
+## Styleguides
+
+### Commit Messages
+
+- Use the present tense ("Add feature" not "Added feature")
+- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
+- Limit the first line to 72 characters or less
+- Reference issues and pull requests liberally after the first line
+- Follow [Conventional Commits](https://www.conventionalcommits.org/) specification
+
+### Code Style
+
+- Follow existing code conventions in the repository
+- Use automated formatters/linting tools where available
+- Write clear, self-documenting code
+- Add comments for complex logic
+- Write meaningful variable and function names
+
 ---
 
-## Development Workflow
+## Contribution Workflow
 
 ### 1. Fork the Repository
 
@@ -324,25 +344,6 @@ git fetch upstream
 git merge upstream/main
 git push origin main
 ```
-
-## Styleguides
-
-### Commit Messages
-
-- Use the present tense ("Add feature" not "Added feature")
-- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Limit the first line to 72 characters or less
-- Reference issues and pull requests liberally after the first line
-- Follow [Conventional Commits](https://www.conventionalcommits.org/) specification
-
-### Code Style
-
-- Follow existing code conventions in the repository
-- Use automated formatters/linting tools where available
-- Write clear, self-documenting code
-- Add comments for complex logic
-- Write meaningful variable and function names
-
 
 ## Attribution
 This guide is based on the **contributing-gen**. [Make your own](https://github.com/bttger/contributing-gen)!
